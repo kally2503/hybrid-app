@@ -75,10 +75,7 @@ resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
   role       = aws_iam_role.eks_node_role.name
 }
 
-resource "aws_iam_role_policy_attachment" "ecr_read_only" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.eks_node_role.name
-}
+# No ECR needed - EKS pulls directly from Artifactory
 
 # EKS Node Group (1 node to minimize cost)
 resource "aws_eks_node_group" "hybrid_nodes" {
@@ -102,29 +99,9 @@ resource "aws_eks_node_group" "hybrid_nodes" {
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_node_policy,
     aws_iam_role_policy_attachment.eks_cni_policy,
-    aws_iam_role_policy_attachment.ecr_read_only,
   ]
 
   tags = {
     Name = "${var.cluster_name}-node"
   }
-}
-
-# ECR Repositories for Docker images
-resource "aws_ecr_repository" "java_app" {
-  name                 = "hybrid-java-app"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-}
-
-resource "aws_ecr_repository" "python_app" {
-  name                 = "hybrid-python-app"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-}
-
-resource "aws_ecr_repository" "angular_app" {
-  name                 = "hybrid-angular-app"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
 }

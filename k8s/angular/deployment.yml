@@ -15,6 +15,8 @@ spec:
       labels:
         app: angular-app
     spec:
+      imagePullSecrets:
+        - name: artifactory-registry-secret
       containers:
         - name: angular-app
           image: DOCKER_REGISTRY/hybrid-angular-app:latest

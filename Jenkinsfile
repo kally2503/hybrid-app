@@ -3,8 +3,6 @@ pipeline {
 
     environment {
         AWS_REGION         = 'us-east-1'
-        AWS_ACCOUNT_ID     = credentials('aws-account-id')
-        ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         EKS_CLUSTER_NAME   = 'hybrid-app-cluster'
         ARTIFACTORY_URL    = credentials('artifactory-url')        // e.g. https://mycompany.jfrog.io/artifactory
         ARTIFACTORY_CREDS  = credentials('artifactory-credentials')
@@ -197,42 +195,8 @@ pipeline {
             }
         }
 
-        // ===================================================
-        // STAGE 6: PULL FROM ARTIFACTORY → PUSH TO AWS ECR
-        // ===================================================
-
-        stage('Artifactory → AWS ECR') {
-            steps {
-                withAWS(credentials: 'aws-credentials', region: "${AWS_REGION}") {
-                    // Login to ECR
-                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-
-                    // Pull from Artifactory (already cached locally from Stage 4)
-                    // Re-tag Artifactory images → ECR and push
-
-                    // Java
-                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:${BUILD_TAG} ${ECR_REGISTRY}/hybrid-java-app:${BUILD_TAG}"
-                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:latest ${ECR_REGISTRY}/hybrid-java-app:latest"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-java-app:${BUILD_TAG}"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-java-app:latest"
-
-                    // Angular
-                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:${BUILD_TAG} ${ECR_REGISTRY}/hybrid-angular-app:${BUILD_TAG}"
-                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:latest ${ECR_REGISTRY}/hybrid-angular-app:latest"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-angular-app:${BUILD_TAG}"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-angular-app:latest"
-
-                    // Python
-                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:${BUILD_TAG} ${ECR_REGISTRY}/hybrid-python-app:${BUILD_TAG}"
-                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:latest ${ECR_REGISTRY}/hybrid-python-app:latest"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-python-app:${BUILD_TAG}"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-python-app:latest"
-                }
-            }
-        }
-
         // ===================================
-        // STAGE 7: DEPLOY TO LOCAL DOCKER
+        // STAGE 6: DEPLOY TO LOCAL DOCKER
         // ===================================
 
         stage('Deploy to Local Docker') {
@@ -245,22 +209,32 @@ pipeline {
             }
         }
 
-        // ===================================
-        // STAGE 8: DEPLOY TO AWS EKS
-        // ===================================
+        // ===================================================
+        // STAGE 7: DEPLOY TO AWS EKS (PULL FROM ARTIFACTORY)
+        // ===================================================
 
         stage('Deploy to EKS') {
             steps {
                 withAWS(credentials: 'aws-credentials', region: "${AWS_REGION}") {
                     sh "aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION}"
 
-                    // Create namespace if not exists
+                    // Create namespace
                     sh 'kubectl apply -f k8s/namespace.yml'
 
-                    // Replace placeholder with actual ECR registry
-                    sh "sed -i 's|DOCKER_REGISTRY|${ECR_REGISTRY}|g' k8s/java/deployment.yml"
-                    sh "sed -i 's|DOCKER_REGISTRY|${ECR_REGISTRY}|g' k8s/python/deployment.yml"
-                    sh "sed -i 's|DOCKER_REGISTRY|${ECR_REGISTRY}|g' k8s/angular/deployment.yml"
+                    // Create/Update Artifactory Docker registry secret so EKS can pull images
+                    sh """
+                        kubectl create secret docker-registry artifactory-registry-secret \
+                            --docker-server=${ARTIFACTORY_DOCKER} \
+                            --docker-username=${ARTIFACTORY_CREDS_USR} \
+                            --docker-password=${ARTIFACTORY_CREDS_PSW} \
+                            --namespace=hybrid-app \
+                            --dry-run=client -o yaml | kubectl apply -f -
+                    """
+
+                    // Replace placeholder with Artifactory Docker registry
+                    sh "sed -i 's|DOCKER_REGISTRY|${ARTIFACTORY_DOCKER}|g' k8s/java/deployment.yml"
+                    sh "sed -i 's|DOCKER_REGISTRY|${ARTIFACTORY_DOCKER}|g' k8s/python/deployment.yml"
+                    sh "sed -i 's|DOCKER_REGISTRY|${ARTIFACTORY_DOCKER}|g' k8s/angular/deployment.yml"
 
                     // Deploy all services
                     sh 'kubectl apply -f k8s/java/deployment.yml'
@@ -285,7 +259,7 @@ pipeline {
             echo '============================================='
             echo 'Pipeline completed successfully!'
             echo '============================================='
-            echo 'Flow: Build → Artifactory → Local Docker + ECR → EKS'
+            echo 'Flow: Build → Artifactory → Local Docker + EKS (pulls from Artifactory)'
             echo 'Local Docker:  http://localhost:4200'
             echo 'EKS: Run kubectl get svc -n hybrid-app for external URL'
             echo '============================================='
