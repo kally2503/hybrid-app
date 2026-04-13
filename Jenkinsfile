@@ -2,14 +2,15 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION        = 'us-east-1'
-        AWS_ACCOUNT_ID    = credentials('aws-account-id')
-        ECR_REGISTRY      = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        EKS_CLUSTER_NAME  = 'hybrid-app-cluster'
-        ARTIFACTORY_URL   = credentials('artifactory-url')
-        ARTIFACTORY_CREDS = credentials('artifactory-credentials')
-        DOCKER_REGISTRY   = 'localhost:5000'  // Local Docker registry for on-prem
-        BUILD_NUMBER_TAG  = "${BUILD_NUMBER}"
+        AWS_REGION         = 'us-east-1'
+        AWS_ACCOUNT_ID     = credentials('aws-account-id')
+        ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        EKS_CLUSTER_NAME   = 'hybrid-app-cluster'
+        ARTIFACTORY_URL    = credentials('artifactory-url')        // e.g. https://mycompany.jfrog.io/artifactory
+        ARTIFACTORY_CREDS  = credentials('artifactory-credentials')
+        ARTIFACTORY_DOCKER = credentials('artifactory-docker-url') // e.g. mycompany.jfrog.io/docker-local
+        DOCKER_LOCAL       = 'localhost:5000'                      // Local Docker registry for on-prem
+        BUILD_TAG          = "${BUILD_NUMBER}"
     }
 
     tools {
@@ -79,40 +80,40 @@ pipeline {
             }
         }
 
-        // ===================================
-        // STAGE 3: PUBLISH TO ARTIFACTORY
-        // ===================================
+        // =============================================
+        // STAGE 3: PUBLISH BUILD ARTIFACTS TO ARTIFACTORY
+        // =============================================
 
-        stage('Publish to Artifactory') {
+        stage('Publish Artifacts to Artifactory') {
             parallel {
-                stage('Publish Java Artifact') {
+                stage('Publish Java JAR') {
                     steps {
                         dir('apps/java-app') {
                             sh """
                                 curl -u ${ARTIFACTORY_CREDS} -T target/*.jar \
-                                "${ARTIFACTORY_URL}/libs-release-local/com/kaeliq/hybrid-java-app/${BUILD_NUMBER_TAG}/hybrid-java-app-${BUILD_NUMBER_TAG}.jar"
+                                "${ARTIFACTORY_URL}/libs-release-local/com/kaeliq/hybrid-java-app/${BUILD_TAG}/hybrid-java-app-${BUILD_TAG}.jar"
                             """
                         }
                     }
                 }
-                stage('Publish Angular Artifact') {
+                stage('Publish Angular Archive') {
                     steps {
                         dir('apps/angular-app') {
-                            sh "tar -czf angular-app-${BUILD_NUMBER_TAG}.tar.gz -C dist/hybrid-angular-app/browser ."
+                            sh "tar -czf angular-app-${BUILD_TAG}.tar.gz -C dist/hybrid-angular-app/browser ."
                             sh """
-                                curl -u ${ARTIFACTORY_CREDS} -T angular-app-${BUILD_NUMBER_TAG}.tar.gz \
-                                "${ARTIFACTORY_URL}/libs-release-local/com/kaeliq/hybrid-angular-app/${BUILD_NUMBER_TAG}/hybrid-angular-app-${BUILD_NUMBER_TAG}.tar.gz"
+                                curl -u ${ARTIFACTORY_CREDS} -T angular-app-${BUILD_TAG}.tar.gz \
+                                "${ARTIFACTORY_URL}/libs-release-local/com/kaeliq/hybrid-angular-app/${BUILD_TAG}/hybrid-angular-app-${BUILD_TAG}.tar.gz"
                             """
                         }
                     }
                 }
-                stage('Publish Python Artifact') {
+                stage('Publish Python Archive') {
                     steps {
                         dir('apps/python-app') {
-                            sh "tar -czf python-app-${BUILD_NUMBER_TAG}.tar.gz *.py requirements.txt"
+                            sh "tar -czf python-app-${BUILD_TAG}.tar.gz *.py requirements.txt"
                             sh """
-                                curl -u ${ARTIFACTORY_CREDS} -T python-app-${BUILD_NUMBER_TAG}.tar.gz \
-                                "${ARTIFACTORY_URL}/libs-release-local/com/kaeliq/hybrid-python-app/${BUILD_NUMBER_TAG}/hybrid-python-app-${BUILD_NUMBER_TAG}.tar.gz"
+                                curl -u ${ARTIFACTORY_CREDS} -T python-app-${BUILD_TAG}.tar.gz \
+                                "${ARTIFACTORY_URL}/libs-release-local/com/kaeliq/hybrid-python-app/${BUILD_TAG}/hybrid-python-app-${BUILD_TAG}.tar.gz"
                             """
                         }
                     }
@@ -120,77 +121,118 @@ pipeline {
             }
         }
 
-        // ===================================
-        // STAGE 4: DOCKER BUILD & PUSH LOCAL
-        // ===================================
+        // =============================================
+        // STAGE 4: DOCKER BUILD & PUSH TO ARTIFACTORY
+        // =============================================
 
-        stage('Docker Build & Push (On-Prem)') {
+        stage('Docker Build & Push to Artifactory') {
+            steps {
+                // Login to Artifactory Docker registry
+                sh "docker login -u ${ARTIFACTORY_CREDS_USR} -p ${ARTIFACTORY_CREDS_PSW} ${ARTIFACTORY_DOCKER}"
+            }
             parallel {
-                stage('Docker: Java') {
+                stage('Docker: Java → Artifactory') {
                     steps {
                         dir('apps/java-app') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/hybrid-java-app:${BUILD_NUMBER_TAG} ."
-                            sh "docker build -t ${DOCKER_REGISTRY}/hybrid-java-app:latest ."
-                            sh "docker push ${DOCKER_REGISTRY}/hybrid-java-app:${BUILD_NUMBER_TAG}"
-                            sh "docker push ${DOCKER_REGISTRY}/hybrid-java-app:latest"
+                            sh "docker build -t ${ARTIFACTORY_DOCKER}/hybrid-java-app:${BUILD_TAG} ."
+                            sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:${BUILD_TAG} ${ARTIFACTORY_DOCKER}/hybrid-java-app:latest"
+                            sh "docker push ${ARTIFACTORY_DOCKER}/hybrid-java-app:${BUILD_TAG}"
+                            sh "docker push ${ARTIFACTORY_DOCKER}/hybrid-java-app:latest"
                         }
                     }
                 }
-                stage('Docker: Angular') {
+                stage('Docker: Angular → Artifactory') {
                     steps {
                         dir('apps/angular-app') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/hybrid-angular-app:${BUILD_NUMBER_TAG} ."
-                            sh "docker build -t ${DOCKER_REGISTRY}/hybrid-angular-app:latest ."
-                            sh "docker push ${DOCKER_REGISTRY}/hybrid-angular-app:${BUILD_NUMBER_TAG}"
-                            sh "docker push ${DOCKER_REGISTRY}/hybrid-angular-app:latest"
+                            sh "docker build -t ${ARTIFACTORY_DOCKER}/hybrid-angular-app:${BUILD_TAG} ."
+                            sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:${BUILD_TAG} ${ARTIFACTORY_DOCKER}/hybrid-angular-app:latest"
+                            sh "docker push ${ARTIFACTORY_DOCKER}/hybrid-angular-app:${BUILD_TAG}"
+                            sh "docker push ${ARTIFACTORY_DOCKER}/hybrid-angular-app:latest"
                         }
                     }
                 }
-                stage('Docker: Python') {
+                stage('Docker: Python → Artifactory') {
                     steps {
                         dir('apps/python-app') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/hybrid-python-app:${BUILD_NUMBER_TAG} ."
-                            sh "docker build -t ${DOCKER_REGISTRY}/hybrid-python-app:latest ."
-                            sh "docker push ${DOCKER_REGISTRY}/hybrid-python-app:${BUILD_NUMBER_TAG}"
-                            sh "docker push ${DOCKER_REGISTRY}/hybrid-python-app:latest"
+                            sh "docker build -t ${ARTIFACTORY_DOCKER}/hybrid-python-app:${BUILD_TAG} ."
+                            sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:${BUILD_TAG} ${ARTIFACTORY_DOCKER}/hybrid-python-app:latest"
+                            sh "docker push ${ARTIFACTORY_DOCKER}/hybrid-python-app:${BUILD_TAG}"
+                            sh "docker push ${ARTIFACTORY_DOCKER}/hybrid-python-app:latest"
                         }
                     }
                 }
             }
         }
 
-        // ===================================
-        // STAGE 5: DOCKER PUSH TO AWS ECR
-        // ===================================
+        // =============================================
+        // STAGE 5: PUSH TO LOCAL DOCKER (ON-PREM)
+        // =============================================
 
-        stage('Push to AWS ECR') {
+        stage('Push to Local Docker Registry') {
+            parallel {
+                stage('Local: Java') {
+                    steps {
+                        sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:${BUILD_TAG} ${DOCKER_LOCAL}/hybrid-java-app:${BUILD_TAG}"
+                        sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:latest ${DOCKER_LOCAL}/hybrid-java-app:latest"
+                        sh "docker push ${DOCKER_LOCAL}/hybrid-java-app:${BUILD_TAG}"
+                        sh "docker push ${DOCKER_LOCAL}/hybrid-java-app:latest"
+                    }
+                }
+                stage('Local: Angular') {
+                    steps {
+                        sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:${BUILD_TAG} ${DOCKER_LOCAL}/hybrid-angular-app:${BUILD_TAG}"
+                        sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:latest ${DOCKER_LOCAL}/hybrid-angular-app:latest"
+                        sh "docker push ${DOCKER_LOCAL}/hybrid-angular-app:${BUILD_TAG}"
+                        sh "docker push ${DOCKER_LOCAL}/hybrid-angular-app:latest"
+                    }
+                }
+                stage('Local: Python') {
+                    steps {
+                        sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:${BUILD_TAG} ${DOCKER_LOCAL}/hybrid-python-app:${BUILD_TAG}"
+                        sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:latest ${DOCKER_LOCAL}/hybrid-python-app:latest"
+                        sh "docker push ${DOCKER_LOCAL}/hybrid-python-app:${BUILD_TAG}"
+                        sh "docker push ${DOCKER_LOCAL}/hybrid-python-app:latest"
+                    }
+                }
+            }
+        }
+
+        // ===================================================
+        // STAGE 6: PULL FROM ARTIFACTORY → PUSH TO AWS ECR
+        // ===================================================
+
+        stage('Artifactory → AWS ECR') {
             steps {
                 withAWS(credentials: 'aws-credentials', region: "${AWS_REGION}") {
+                    // Login to ECR
                     sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
 
-                    // Tag & push Java
-                    sh "docker tag ${DOCKER_REGISTRY}/hybrid-java-app:${BUILD_NUMBER_TAG} ${ECR_REGISTRY}/hybrid-java-app:${BUILD_NUMBER_TAG}"
-                    sh "docker tag ${DOCKER_REGISTRY}/hybrid-java-app:latest ${ECR_REGISTRY}/hybrid-java-app:latest"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-java-app:${BUILD_NUMBER_TAG}"
+                    // Pull from Artifactory (already cached locally from Stage 4)
+                    // Re-tag Artifactory images → ECR and push
+
+                    // Java
+                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:${BUILD_TAG} ${ECR_REGISTRY}/hybrid-java-app:${BUILD_TAG}"
+                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-java-app:latest ${ECR_REGISTRY}/hybrid-java-app:latest"
+                    sh "docker push ${ECR_REGISTRY}/hybrid-java-app:${BUILD_TAG}"
                     sh "docker push ${ECR_REGISTRY}/hybrid-java-app:latest"
 
-                    // Tag & push Angular
-                    sh "docker tag ${DOCKER_REGISTRY}/hybrid-angular-app:${BUILD_NUMBER_TAG} ${ECR_REGISTRY}/hybrid-angular-app:${BUILD_NUMBER_TAG}"
-                    sh "docker tag ${DOCKER_REGISTRY}/hybrid-angular-app:latest ${ECR_REGISTRY}/hybrid-angular-app:latest"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-angular-app:${BUILD_NUMBER_TAG}"
+                    // Angular
+                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:${BUILD_TAG} ${ECR_REGISTRY}/hybrid-angular-app:${BUILD_TAG}"
+                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-angular-app:latest ${ECR_REGISTRY}/hybrid-angular-app:latest"
+                    sh "docker push ${ECR_REGISTRY}/hybrid-angular-app:${BUILD_TAG}"
                     sh "docker push ${ECR_REGISTRY}/hybrid-angular-app:latest"
 
-                    // Tag & push Python
-                    sh "docker tag ${DOCKER_REGISTRY}/hybrid-python-app:${BUILD_NUMBER_TAG} ${ECR_REGISTRY}/hybrid-python-app:${BUILD_NUMBER_TAG}"
-                    sh "docker tag ${DOCKER_REGISTRY}/hybrid-python-app:latest ${ECR_REGISTRY}/hybrid-python-app:latest"
-                    sh "docker push ${ECR_REGISTRY}/hybrid-python-app:${BUILD_NUMBER_TAG}"
+                    // Python
+                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:${BUILD_TAG} ${ECR_REGISTRY}/hybrid-python-app:${BUILD_TAG}"
+                    sh "docker tag ${ARTIFACTORY_DOCKER}/hybrid-python-app:latest ${ECR_REGISTRY}/hybrid-python-app:latest"
+                    sh "docker push ${ECR_REGISTRY}/hybrid-python-app:${BUILD_TAG}"
                     sh "docker push ${ECR_REGISTRY}/hybrid-python-app:latest"
                 }
             }
         }
 
         // ===================================
-        // STAGE 6: DEPLOY TO LOCAL DOCKER
+        // STAGE 7: DEPLOY TO LOCAL DOCKER
         // ===================================
 
         stage('Deploy to Local Docker') {
@@ -204,7 +246,7 @@ pipeline {
         }
 
         // ===================================
-        // STAGE 7: DEPLOY TO AWS EKS
+        // STAGE 8: DEPLOY TO AWS EKS
         // ===================================
 
         stage('Deploy to EKS') {
@@ -240,11 +282,13 @@ pipeline {
 
     post {
         success {
-            echo '===================================='
+            echo '============================================='
             echo 'Pipeline completed successfully!'
-            echo 'Local Docker: http://localhost:4200'
-            echo 'EKS: Check kubectl get svc -n hybrid-app for external URL'
-            echo '===================================='
+            echo '============================================='
+            echo 'Flow: Build → Artifactory → Local Docker + ECR → EKS'
+            echo 'Local Docker:  http://localhost:4200'
+            echo 'EKS: Run kubectl get svc -n hybrid-app for external URL'
+            echo '============================================='
         }
         failure {
             echo 'Pipeline failed! Check logs above.'
