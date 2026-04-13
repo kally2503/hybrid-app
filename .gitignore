@@ -1,0 +1,35 @@
+# Java
+apps/java-app/target/
+*.class
+*.jar
+
+# Angular
+apps/angular-app/node_modules/
+apps/angular-app/dist/
+apps/angular-app/.angular/
+
+# Python
+apps/python-app/__pycache__/
+apps/python-app/*.pyc
+apps/python-app/venv/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/tfplan
+terraform/.terraform.lock.hcl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+*.pem
