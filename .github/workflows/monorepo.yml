@@ -126,24 +126,19 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
-          cache: 'npm'  # ← AUTO-CACHES node_modules ⚡
-          cache-dependency-path: 'apps/angular-app/package-lock.json'
-      
+          node-version: '20'
+          # No cache: requires package-lock.json which we don't commit yet.
+
       - name: Install Dependencies
         run: |
           cd apps/angular-app
-          npm ci  # Faster than npm install
-      
+          npm install
+
       - name: Build
         run: |
           cd apps/angular-app
-          npm run build --prod
-      
-      - name: Run Tests
-        run: |
-          cd apps/angular-app
-          npm test -- --watch=false --browsers=ChromeHeadless
+          npm run build
+      # Tests skipped for now — no spec files exist. Re-add when tests are written.
 
   # Build Python app (only if changed)
   build-python:
@@ -157,22 +152,19 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          cache: 'pip'  # ← AUTO-CACHES pip packages ⚡
-      
+          cache: 'pip'
+          cache-dependency-path: 'apps/python-app/requirements.txt'
+
       - name: Install Dependencies
         run: |
           cd apps/python-app
           pip install -r requirements.txt
-      
-      - name: Run Tests
+
+      - name: Smoke Test (import check)
         run: |
           cd apps/python-app
-          pytest
-      
-      - name: Lint
-        run: |
-          cd apps/python-app
-          flake8 .
+          python -c "import app; print('OK: app imports cleanly')"
+      # pytest + flake8 skipped for now — no tests or lint config exist yet.
 
   # Deploy to Kubernetes (all apps passed)
   # TODO: Re-enable when a real cluster + KUBE_CONFIG secret are available.

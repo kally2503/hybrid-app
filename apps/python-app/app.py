@@ -1,3 +1,4 @@
+# CI trigger: enable build-python via paths-filter
 from flask import Flask, jsonify
 import os
 import time
