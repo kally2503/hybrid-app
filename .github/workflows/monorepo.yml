@@ -95,7 +95,7 @@ jobs:
       - name: Build Docker Image
         run: |
           docker build -t kaeliq/java-app:${{ github.sha }} \
-            -f docker/java-app.Dockerfile .
+            -f apps/java-app/Dockerfile apps/java-app
       
       - name: Push to Registry
         run: |
