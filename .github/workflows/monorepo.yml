@@ -92,15 +92,28 @@ jobs:
           mvn deploy -DskipTests \
             -DaltDeploymentRepository="artifactory::default::${ARTIFACTORY_URL}"
       
+      - name: Log in to DockerHub
+        env:
+          DOCKER_USERNAME: kalaiadmin
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          if [ -z "$DOCKER_PASSWORD" ]; then
+            echo "::error::DOCKER_PASSWORD secret is EMPTY or not set."
+            exit 1
+          fi
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
       - name: Build Docker Image
         run: |
-          docker build -t kaeliq/java-app:${{ github.sha }} \
+          docker build \
+            -t kalaiadmin/java-app:${{ github.sha }} \
+            -t kalaiadmin/java-app:latest \
             -f apps/java-app/Dockerfile apps/java-app
-      
-      - name: Push to Registry
+
+      - name: Push to DockerHub
         run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u kaeliq --password-stdin
-          docker push kaeliq/java-app:${{ github.sha }}
+          docker push kalaiadmin/java-app:${{ github.sha }}
+          docker push kalaiadmin/java-app:latest
 
   # Build Angular app (only if changed)
   build-angular:
@@ -162,13 +175,16 @@ jobs:
           flake8 .
 
   # Deploy to Kubernetes (all apps passed)
+  # TODO: Re-enable when a real cluster + KUBE_CONFIG secret are available.
+  # Remove 'if: false' and restore the always()/result guard below.
   deploy:
     needs: [build-java, build-angular, build-python]
-    if: |
-      always() &&
-      github.ref == 'refs/heads/main' &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled')
+    if: false
+    # if: |
+    #   always() &&
+    #   github.ref == 'refs/heads/main' &&
+    #   !contains(needs.*.result, 'failure') &&
+    #   !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
