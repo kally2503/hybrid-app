@@ -15,8 +15,10 @@ jobs:
       angular: ${{ steps.filter.outputs.angular }}
       python: ${{ steps.filter.outputs.python }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: dorny/paths-filter@v2
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
@@ -26,6 +28,11 @@ jobs:
               - 'apps/angular-app/**'
             python:
               - 'apps/python-app/**'
+      - name: Debug filter outputs
+        run: |
+          echo "java=${{ steps.filter.outputs.java }}"
+          echo "angular=${{ steps.filter.outputs.angular }}"
+          echo "python=${{ steps.filter.outputs.python }}"
 
   # Build Java app (only if changed)
   build-java:
@@ -132,7 +139,11 @@ jobs:
   # Deploy to Kubernetes (all apps passed)
   deploy:
     needs: [build-java, build-angular, build-python]
-    if: github.ref == 'refs/heads/main'
+    if: |
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
