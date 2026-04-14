@@ -1,0 +1,150 @@
+name: Hybrid App CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Detect what changed
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      java: ${{ steps.filter.outputs.java }}
+      angular: ${{ steps.filter.outputs.angular }}
+      python: ${{ steps.filter.outputs.python }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            java:
+              - 'apps/java-app/**'
+            angular:
+              - 'apps/angular-app/**'
+            python:
+              - 'apps/python-app/**'
+
+  # Build Java app (only if changed)
+  build-java:
+    needs: changes
+    if: needs.changes.outputs.java == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'  # ← AUTO-CACHES ~/.m2 ⚡
+      
+      - name: Build with Maven
+        run: |
+          cd apps/java-app
+          mvn clean package -DskipTests
+      
+      - name: Run Tests
+        run: |
+          cd apps/java-app
+          mvn test
+      
+      - name: Upload to JFrog Artifactory
+        env:
+          ARTIFACTORY_URL: ${{ secrets.ARTIFACTORY_URL }}
+          ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
+        run: |
+          cd apps/java-app
+          mvn deploy -DskipTests
+      
+      - name: Build Docker Image
+        run: |
+          docker build -t kaeliq/java-app:${{ github.sha }} \
+            -f docker/java-app.Dockerfile .
+      
+      - name: Push to Registry
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u kaeliq --password-stdin
+          docker push kaeliq/java-app:${{ github.sha }}
+
+  # Build Angular app (only if changed)
+  build-angular:
+    needs: changes
+    if: needs.changes.outputs.angular == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'  # ← AUTO-CACHES node_modules ⚡
+          cache-dependency-path: 'apps/angular-app/package-lock.json'
+      
+      - name: Install Dependencies
+        run: |
+          cd apps/angular-app
+          npm ci  # Faster than npm install
+      
+      - name: Build
+        run: |
+          cd apps/angular-app
+          npm run build --prod
+      
+      - name: Run Tests
+        run: |
+          cd apps/angular-app
+          npm test -- --watch=false --browsers=ChromeHeadless
+
+  # Build Python app (only if changed)
+  build-python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'  # ← AUTO-CACHES pip packages ⚡
+      
+      - name: Install Dependencies
+        run: |
+          cd apps/python-app
+          pip install -r requirements.txt
+      
+      - name: Run Tests
+        run: |
+          cd apps/python-app
+          pytest
+      
+      - name: Lint
+        run: |
+          cd apps/python-app
+          flake8 .
+
+  # Deploy to Kubernetes (all apps passed)
+  deploy:
+    needs: [build-java, build-angular, build-python]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+      
+      - name: Deploy to K8s
+        run: |
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/java-app
+          kubectl rollout status deployment/angular-app
