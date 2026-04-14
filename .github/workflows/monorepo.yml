@@ -68,8 +68,29 @@ jobs:
           MAVEN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.ARTIFACTORY_TOKEN }}
         run: |
+          # --- Diagnostic: verify secrets are wired (values masked) ---
+          if [ -z "$ARTIFACTORY_URL" ]; then
+            echo "::error::ARTIFACTORY_URL secret is EMPTY or not set. Set it in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          if [ -z "$MAVEN_USERNAME" ]; then
+            echo "::error::ARTIFACTORY_USERNAME secret is EMPTY or not set."
+            exit 1
+          fi
+          if [ -z "$MAVEN_PASSWORD" ]; then
+            echo "::error::ARTIFACTORY_TOKEN secret is EMPTY or not set."
+            exit 1
+          fi
+          echo "ARTIFACTORY_URL length: ${#ARTIFACTORY_URL}"
+          echo "MAVEN_USERNAME length: ${#MAVEN_USERNAME}"
+          echo "MAVEN_PASSWORD length: ${#MAVEN_PASSWORD}"
+
           cd apps/java-app
-          mvn deploy -DskipTests
+          # Use altDeploymentRepository to bypass any ${env.X} interpolation
+          # issues in pom.xml. The 'artifactory' id must match server-id in
+          # setup-java, so ~/.m2/settings.xml credentials are used.
+          mvn deploy -DskipTests \
+            -DaltDeploymentRepository="artifactory::default::${ARTIFACTORY_URL}"
       
       - name: Build Docker Image
         run: |
