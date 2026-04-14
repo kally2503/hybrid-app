@@ -42,4 +42,17 @@
             </plugin>
         </plugins>
     </build>
+
+    <distributionManagement>
+        <repository>
+            <id>artifactory</id>
+            <name>JFrog Artifactory Releases</name>
+            <url>${env.ARTIFACTORY_URL}</url>
+        </repository>
+        <snapshotRepository>
+            <id>artifactory</id>
+            <name>JFrog Artifactory Snapshots</name>
+            <url>${env.ARTIFACTORY_URL}</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>
